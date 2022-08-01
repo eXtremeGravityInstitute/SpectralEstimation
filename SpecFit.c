@@ -39,7 +39,7 @@
 int main(int argc, char *argv[])
 {
 
-  int i, j, k, ii, kk, sc, ND, N, Ns, Nm, m, mc, dec, MK, MS, skip;
+  int i, j, k, ii, kk, sc, ND, N, Ns, Nm, m, mc, dec, MM, MK, MS, skip;
   int imin, imax, acS, acL, acH, cS, cL, cH;
   int typ, sm;
   double *timeF, *dataF;
@@ -155,14 +155,20 @@ int main(int argc, char *argv[])
     
     
     printf("Down sample = %d\n", dec);
+    
+    N = ND/dec;
+    
+    if(dec > 1)
+    {
 
-    fmn = 8.0;
+    fmn = 1.0;
     
     // apply 8th order zero phase bandpass filter
     bwbpf(dataF, dataF, 1, ND, 8, 1.0/dt, fmx, fmn);
     bwbpf(dataF, dataF, -1, ND, 8, 1.0/dt, fmx, fmn);
+        
+    }
     
-    N = ND/dec;
     
     times = (double*)malloc(sizeof(double)* (N));
     data = (double*)malloc(sizeof(double)* (N));
@@ -604,79 +610,14 @@ int main(int argc, char *argv[])
     if(verbose==1) out = fopen("schain.dat","w");
     
     itime = omp_get_wtime();
+    
+    MM = 400000;   // iterations of MCMC
+    if(fmx > 4000.0) MM = 800000;
+   
       
        for (mc = 0; mc < MM; ++mc)
        {
            
-           // prune any weak lines
-           if(mc > MM/4 && mc < MM/2 && mc%2000 == 0)
-           {
-               j = 0;
-               for (k = 0; k < Nlines; ++k)
-               {
-                   i = (int)(linef[k]*Tobs);  // bin where line peaks
-                   x = lineh[k]/SM[i];     // height of line relative to smooth
-                   if(x > 3.0)  // keep this line
-                   {
-                       linef[j] = linef[k];
-                       lineh[j] = lineh[k];
-                       lineQ[j] = lineQ[k];
-                       linew[j] = linew[k];
-                       deltafmax[j] = deltafmax[k];
-                       j++;
-                   }
-               }
-               
-               Nlines = j;
-               
-               // reset line spectrum
-               for (i = 0; i < Ns; ++i)
-               {
-                  f = freqs[i];
-                  y = 0.0;
-                  for (j = 0; j < Nlines; ++j) y += line(f, linef[j], lineh[j], linew[j], deltafmax[j], lineQ[j]);
-                  SL[i] = y;
-               }
-               
-                 if(ompflag == 1)
-                 {
-                 // reset likelihood
-                 #pragma omp parallel for
-                 for (i = 0; i < Ns; ++i)
-                  {
-                      SN[i] = SM[i] + SL[i];
-                      SNY[i] = SN[i];
-                      LarrayX[i] = -(log(SN[i]) + PS[i]/SN[i]);
-                  }
-                     
-                     logLx = 0.0;
-                     for (i=0; i< Ns; i++) logLx += LarrayX[i];
-                     
-                     /*
-                    logLx = 0.0;
-                    #pragma omp parallel for reduction (+:logLx)
-                    {
-                     for (i=0; i< Ns; i++) logLx += LarrayX[i];
-                    }*/
-
-                 }
-                 else
-                 {
-               
-               // non omp version
-                 for (i = 0; i < Ns; ++i)
-                  {
-                      SN[i] = SM[i] + SL[i];
-                      SNY[i] = SN[i];
-                      LarrayX[i] = -(log(SN[i]) + PS[i]/SN[i]);
-                  }
-                 logLx = 0.0;
-                 for (i=0; i< Ns; i++) logLx += LarrayX[i];
-                 }
-
-               
-            }
-             
            
            alpha = gsl_rng_uniform(r);
            
@@ -710,17 +651,17 @@ int main(int argc, char *argv[])
              k = (int)((double)(Nknot)*gsl_rng_uniform(r));
                
                alpha = gsl_rng_uniform(r);
-               if(alpha > 0.5)
+               if(alpha > 0.7)
                {
-                Ysline[k] =  Xsline[k] + gsl_ran_gaussian(r,0.05);
+                Ysline[k] =  Xsline[k] + gsl_ran_gaussian(r,0.1);
                }
-               else if (alpha > 0.3)
+               else if (alpha > 0.4)
                {
-                Ysline[k] =  Xsline[k] + gsl_ran_gaussian(r,0.02);
+                   Ysline[k] =  Xsline[k] + gsl_ran_gaussian(r,1.0);
                }
                else
                {
-                Ysline[k] =  Xsline[k] + gsl_ran_gaussian(r,0.1);
+                   Ysline[k] =  Xsline[k] + gsl_ran_gaussian(r,5.0);
                }
                
 
@@ -946,8 +887,6 @@ int main(int argc, char *argv[])
     ftime = omp_get_wtime();
     exec_time = ftime - itime;
     printf("\nMCMC took %f seconds\n", exec_time);
-        
-      printf("There are %d lines remaining\n", Nlines);
     
     for (i = 0; i < Ns; ++i) SNA[i] /= (double)(sc);
 

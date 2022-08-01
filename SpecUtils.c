@@ -1464,6 +1464,8 @@ void clean(double *D, double *Draw, double *Hf, double *sqf, double *freqs, doub
     clock_t start, end;
     double cpu_time_used;
     
+     double itime, ftime, exec_time;
+    
     FILE *out;
     
     live= double_matrix(Nf,N);
@@ -1503,22 +1505,22 @@ void clean(double *D, double *Draw, double *Hf, double *sqf, double *freqs, doub
     }
     
     // Form spectral model for whitening data (lines plus a smooth component)
-       start = clock();
+       itime = omp_get_wtime();
        spectrum(D, Sn, specD, sspecD, df, N);
-       end = clock();
-       cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
-       printf("spectrum took %f seconds\n", cpu_time_used);
+       ftime = omp_get_wtime();
+       exec_time = ftime - itime;
+       printf("spectrum took %f seconds\n", exec_time);
    
     
     // whiten data
     whiten(Dtemp, specD, N);
     
     // Wavelet transform
-    start = clock();
+   itime = omp_get_wtime();
     TransformC(Dtemp, freqs, tfD, tfDR, tfDI, Q, Tobs, N, Nf);
-    end = clock();
-    cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
-    printf("wavelet transform took %f seconds\n", cpu_time_used);
+    ftime = omp_get_wtime();
+    exec_time = ftime - itime;
+    printf("wavelet transform took %f seconds\n", exec_time);
     
     
     if(pflag == 1)
