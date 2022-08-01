@@ -78,23 +78,27 @@ void getrangesmooth(struct Smooth *smoothline, int k, int Nknot, int Ns, double 
 
 void getrangeakima(int k, int Nknot, double *ffit, double Tobs, int *imin, int *imax)
 {
-              if(k > 1)
+    // The original Akima solines used a 5 point stencil. The GSL Akima splines use
+    // a 7 point stencil (maybe to make the fit C^2 versus C^1?)
+    
+              if(k > 2)
               {
-                  *imin = (int)(ffit[k-2]*Tobs);
+                  *imin = (int)(ffit[k-3]*Tobs);
               }
               else
               {
                   *imin = (int)(ffit[0]*Tobs);
               }
               
-              if(k < Nknot-2)
+              if(k < Nknot-3)
               {
-                  *imax = (int)(ffit[k+2]*Tobs);
+                  *imax = (int)(ffit[k+3]*Tobs);
               }
               else
               {
                   *imax = (int)(ffit[Nknot-1]*Tobs);
               }
+    
 }
 
 double line(double f, double linef, double lineh, double linew, double deltafmax, double lineQ)
