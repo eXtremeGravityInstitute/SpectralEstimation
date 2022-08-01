@@ -1,0 +1,21 @@
+CC=gcc
+CCFLAGS=`pkg-config --cflags lal lalsupport lalframe`
+LDFLAGS += `pkg-config --libs lal lalsupport lalframe`
+
+all: getspec specfit gtest
+
+getspec : getspec.c
+	$(CC) $(CCFLAGS) $(LDFLAGS) -o getspec getspec.c -lm 
+
+specfit : SpecFit.c
+	$(CC) -O3 -std=gnu99 -fopenmp -w -o SpecFit SpecFit.c SpecUtils.c -lgsl -lm
+
+gtest : Gauss_Test_Freq.c
+	$(CC) -o Gauss_Test_Freq Gauss_Test_Freq.c -lm -lgsl
+
+clean:
+	rm getspec SpecFit Gauss_Test_Freq
+
+
+
+

@@ -1,0 +1,19 @@
+CC=gcc
+
+all: getspec_gwosc specfit gtest
+
+getspec : getspec_gwosc.c
+	$(CC) -o getspec_gwosc getspec_gwosc.c -lm 
+
+specfit : SpecFit.c
+	$(CC) -O3 -std=gnu99 -fopenmp -w -o SpecFit SpecFit.c SpecUtils.c -lgsl -lm
+
+gtest : Gauss_Test_Freq.c
+	$(CC) -o Gauss_Test_Freq Gauss_Test_Freq.c -lm -lgsl
+
+clean:
+	rm getspec SpecFit Gauss_Test_Freq
+
+
+
+
