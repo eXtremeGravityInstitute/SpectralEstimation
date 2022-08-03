@@ -33,14 +33,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define sthresh 10.0
 #define warm 6.0
 
+#define NCC  2  // number of cold chains
+#define NCH  2  // number of hot chains
+#define maxmod 1000 // maximum number of parameters in each model
 #define verbose 1   // set to 0 for quiet run, 1 for verbose
+#define printQscan 0  // set to 1 to print Qscan
 #define dfmin 4.0  // minimum spline spacing
 #define dfmax 32.0  // maximum spline spacing
 #define smooth 8.0   // moving average
 #define tol 0.2     // tolerance for difference in averages
 #define linemul 8.0 // how much above the Gaussian floor a line needs to be
 #define itype 1   // 0 for amkima splines, 1 for smoothed linear
-#define NTHREAD 16  // number of threads
 #define ompflag 0 // 1 to use open mp for the likelihood, 0 to not use it
 #define Qprint 8.0    // Q used to make output scans
 

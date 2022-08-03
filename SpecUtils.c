@@ -1425,7 +1425,7 @@ void specest(double *data, double *Hf, int N, int Ns, double dt, double fmx, dou
     }
     
     // save Q-scan data to file
-    if(verbose == 1)
+    if(printQscan == 1)
     {
     clean(D, Draw, Hf, sqf, freqs, Sn, specD, sspecD, df, Qprint, Tobs, scale, alpha, Nf, N, imin, imax, &SNR, 1);
     }
