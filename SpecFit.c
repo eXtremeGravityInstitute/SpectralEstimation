@@ -43,18 +43,12 @@ gsl_rng **rvec;
 // Linux
 // gcc -O3 -std=gnu99 -fopenmp -w -o SpecFit SpecFit.c SpecUtils.c -lgsl -lm
 
-void update(int m, int q, double *logLx, struct Smooth *smoothline, double heat, double smsc, double lnsc, double Tobs, int Ns, int Nknot, int Nlines, double *freqs, double *PS, double *LarrayX, double *SM, double *SL, double *SN, double *ffitx, double *Xsline,  double *bx, double *cx, double *slopex, double *delx,  double  *linef, double *lineh, double *lineQ, double *linew, double *deltafmax, int *cS, int *cL, int *acS, int *acL, gsl_rng *r);
-
-int smoothset(int Ns, double *SM, double *freqs, double Tobs, double *fit, double *smline, int *Nk);
-
-int lineset(int Ns, double *SM, double *PS, double *freqs, double Tobs, double *lf, double *lh, double *lQ, double *lw, double *dfmx, int *Nlns);
-
 int main(int argc, char *argv[])
 {
 
   int i, j, k, ii, kk, sc, ND, N, Ns, Nm, m, mc, dec, MM, MK, MS, skip;
   int scount, sacc, hold;
-  int NC;
+  int NC, NCC, NCH;
   double **LarrayX;
   double *logLx;
   int *who;
@@ -220,9 +214,20 @@ int main(int argc, char *argv[])
        }
     
     Ns = (int)(Tobs*fmx);
-    NC = NCC+NCH;
+
     
-     printf("max threads = %d\n", omp_get_max_threads());
+    // omp can count threads, but doesn't seem to know about physical cores
+    // hyperthreading does appear to help MPI, so physical cores are what really count
+    // Unfortunately, OSX have different and incompatible system calles to tell you
+    // the real number of cores (sysctl -n hw.physicalcpu in OSX and lscpu in Linux)
+    // Instead, we divide down by 2 to be safe
+    NC = omp_get_max_threads()/2;
+    if(NC > coremax) NC = coremax; // don't wnat to be too greedy
+    NCC = NC/2;  // use half the cores for cold chains
+    NCH = NC-NCC;
+    
+    printf("Using %d cold and %d hot chains\n", NCC, NCH);
+    
     
     lf = double_vector(maxmod);
     lh = double_vector(maxmod);
@@ -408,7 +413,14 @@ int main(int argc, char *argv[])
          out = fopen("specstart.dat","w");
          for (i = 0; i < Ns; ++i)
          {
-             SN[0][i] = SM[0][i]+SL[0][i];
+             if(addmul == 0)
+             {
+                 SN[0][i] = SM[0][i]+SL[0][i];
+             }
+             else
+             {
+                 SN[0][i] = SM[0][i]*(1.0+SL[0][i]);
+             }
              fprintf(out,"%e %e %e %e\n", freqs[i], SM[0][i], SL[0][i], SN[0][i]);
          }
          fclose(out);
@@ -449,8 +461,8 @@ int main(int argc, char *argv[])
     lmax = logLx[0];
     qmax = 0;
     
-    MM = 200000;   // iterations of MCMC
-    if(fmx > 4000.0) MM = 400000;
+    MM = 200000/NCC;   // iterations of MCMC
+    if(fmx > 4000.0) MM = 400000/NCC;
     
     scount = 1;
     sacc = 0;
@@ -588,6 +600,14 @@ int main(int argc, char *argv[])
                      y = 0.0;
                      for (j = 0; j < Nlines; ++j) y += line(f, linef[0][j], lineh[0][j], linew[0][j], deltafmax[0][j], lineQ[0][j]);
                      SL[0][i] = y;
+                     if(addmul == 0)
+                       {
+                        SN[0][i] = SM[0][i]+SL[0][i];
+                       }
+                      else
+                       {
+                        SN[0][i] = SM[0][i]*(1.0+SL[0][i]);
+                       }
                  }
                
                     for (j = 1; j < NC; ++j)
@@ -624,12 +644,14 @@ int main(int argc, char *argv[])
                k = who[0];
                x = (double)acS[k]/(double)(cS[k]);
                if(x > 0.7) smsc *= 2.0;
-               if(x < 0.3) smsc /= 2.0;
+               if(x < 0.4) smsc /= 2.0;
                
                k = who[0];
                x = (double)acL[k]/(double)(cL[k]);
                if(x > 0.7) lnsc *= 2.0;
-               if(x < 0.3) lnsc /= 2.0;
+               if(x < 0.4) lnsc /= 2.0;
+               
+               printf("%f %f\n", smsc, lnsc);
                
                scount = 1;
                sacc = 0;
@@ -809,482 +831,3 @@ int main(int argc, char *argv[])
 
 }
 
-void update(int m, int q, double *logLx, struct Smooth *smoothline, double heat, double smsc, double lnsc, double Tobs, int Ns, int Nknot, int Nlines, double *freqs, double *PS, double *LarrayX, double *SM, double *SL, double *SN, double *ffitx, double *Xsline,  double *bx, double *cx, double *slopex, double *delx,  double  *linef, double *lineh, double *lineQ, double *linew, double *deltafmax, int *cS, int *cL, int *acS, int *acL, gsl_rng *r)
-{
-    double alpha, H, logLy;
-    int i, j, k;
-    int typ;
-    int imin, imax;
-    double *Ysline, *ffity;
-    double *slopey, *by, *cy, *dely;
-    double *DS, *SNY, *LarrayY;
-    double ylinew, ylinef, ylineh, ylineQ, ydeltafmax;
-    double sqht, df, spread;
-    
-    gsl_spline   *aspline;
-    gsl_interp_accel *acc;
-    
-    sqht = sqrt(heat);
-    df = 1.0/Tobs;
-    
-    alpha = gsl_rng_uniform(r);
-    
-    SNY = double_vector(Ns);
-    LarrayY = double_vector(Ns);
-    DS = double_vector(Ns);
-    
-    for (i = 0; i < Ns; ++i)
-    {
-        SNY[i] = SN[i];
-        LarrayY[i] = LarrayX[i];
-    }
-    
-
-  if(alpha < 0.6) // update sline
-  {
-    
-   typ = 0;
-   cS[m]++;
-      
-      Ysline = double_vector(Nknot);
-      ffity = double_vector(Nknot);
-      
-      if(itype == 1)
-      {
-          slopey = double_vector(Nknot);
-          by = double_vector(Nknot);
-          cy = double_vector(Nknot);
-          dely = double_vector(Nknot);
-      }
-      else
-      {
-        // Allocate spline
-        aspline = gsl_spline_alloc(gsl_interp_akima, Nknot);
-        acc = gsl_interp_accel_alloc();
-      }
-      
-   
-     // important to make sure all the sline points and slopes are properly initialized
-     // the proposed updates reset parts of slopey array, and the impact on the aa, bb etc
-     // coefficients extends over several points
-     for (i = 0; i < Nknot; ++i)
-     {
-         Ysline[i] =  Xsline[i];
-         ffity[i] = ffitx[i]; // the knot locations don't change in this code
-     }
-        
-     if(itype == 1)
-     {
-       for (i = 0; i < Nknot; ++i)
-         {
-          slopey[i] = slopex[i];
-          by[i] = bx[i];
-          cy[i] = cx[i];
-          dely[i] = delx[i];
-         }
-     }
-        
-      // pick a knot to update
-      k = (int)((double)(Nknot)*gsl_rng_uniform(r));
-        
-        alpha = gsl_rng_uniform(r);
-        if(alpha > 0.7)
-        {
-           Ysline[k] =  Xsline[k] + smsc*sqht*gsl_ran_gaussian(r,0.1);
-        }
-        else if (alpha > 0.4)
-        {
-            Ysline[k] =  Xsline[k] + smsc*sqht*gsl_ran_gaussian(r,0.5);
-        }
-        else
-        {
-            Ysline[k] =  Xsline[k] + smsc*sqht*gsl_ran_gaussian(r,2.0);
-        }
-        
-
-        if(itype == 1)
-        {
-        // if control point k is updated, need to do a delta update on the smooth line model
-        // region between ffit[k-(Nsten-2)] and ffit[k] is impacted. Care needs to be taken at boundary points.
-        delta_setupsline(smoothline, k, Nknot, Ysline, ffity, slopey, by, cy, dely);
-        getrangesmooth(smoothline, k, Nknot, Ns, ffity, Tobs, &imin, &imax);
-        sline(smoothline, imin, imax, Nknot, freqs, DS, ffity, Ysline, by, cy, dely);
-        }
-        else
-        {
-          gsl_spline_init(aspline,ffitx,Ysline,Nknot);
-          getrangeakima(k, Nknot, ffity, Tobs, &imin, &imax);
-          for (i = imin; i < imax; ++i) DS[i] = exp(gsl_spline_eval(aspline,freqs[i],acc));
-        }
-        
-       
-        for (i = imin; i < imax; ++i)
-         {
-           SNY[i] = DS[i] + SL[i];
-           LarrayY[i] =  -(log(SNY[i]) + PS[i]/SNY[i]);
-         }
-        logLy = logLx[q];
-        for (i=imin; i< imax; i++) logLy += (LarrayY[i]-LarrayX[i]);
-      
-      
-         
-        
-    }
-    else // line update
-    {
-        
-       typ = 1;
-       cL[m]++;
-        
-        // pick a line to update
-                   k = (int)((double)(Nlines)*gsl_rng_uniform(r));
-                    
-                    alpha = gsl_rng_uniform(r);
-                    if(alpha > 0.5)
-                    {
-                     ylinef = linef[k] + lnsc*sqht*gsl_ran_gaussian(r,df);
-                     ylineh = lineh[k]*(1.0+lnsc*sqht*gsl_ran_gaussian(r,0.05));
-                     ylineQ = lineQ[k] + lnsc*sqht*gsl_ran_gaussian(r,1.0);
-                    }
-                    else if (alpha > 0.3)
-                    {
-                     ylinef = linef[k] + lnsc*sqht*gsl_ran_gaussian(r,2.0*df);
-                     ylineh = lineh[k]*(1.0+lnsc*sqht*gsl_ran_gaussian(r,0.1));
-                     ylineQ = lineQ[k] + lnsc*sqht*gsl_ran_gaussian(r,2.0);
-                    }
-                    else
-                    {
-                     ylinef = linef[k] + lnsc*sqht*gsl_ran_gaussian(r,0.2*df);
-                     ylineh = lineh[k]*(1.0+lnsc*sqht*gsl_ran_gaussian(r,0.01));
-                     ylineQ = lineQ[k] + lnsc*sqht*gsl_ran_gaussian(r,0.2);
-                    }
-        
-       if(ylineQ < 10.0) ylineQ = 10.0;
-       
-        spread = (1.0e-2*ylineQ);
-        if(spread < 50.0) spread = 50.0;  // maximum half-width is f_resonance/20
-        ydeltafmax = ylinef/spread;
-        ylinew = 8.0*ydeltafmax;
-        
-       // need to cover old and new line
-        imin = (int)((linef[k]-linew[k])*Tobs);
-        imax = (int)((linef[k]+linew[k])*Tobs);
-        i = (int)((ylinef-ylinew)*Tobs);
-        if(i < imin) imin = i;
-        i = (int)((ylinef+ylinew)*Tobs);
-        if(i > imax) imax = i;
-        if(imin < 0) imin = 0;
-        if(imax > Ns-1) imax = Ns-1;
-        
-       // proposed line contribution
-        for (i = imin; i <= imax; ++i) DS[i] = line(freqs[i], ylinef, ylineh, ylinew, ydeltafmax, ylineQ);
-          
-       // have to recompute and remove current line since lines can overlap
-        for (i = imin; i <= imax; ++i) DS[i] -= line(freqs[i], linef[k], lineh[k], linew[k], deltafmax[k], lineQ[k]);
-        
-       
-        for (i = imin; i < imax; ++i)
-         {
-           SNY[i] = SM[i] + SL[i] + DS[i];
-           LarrayY[i] =  -(log(SNY[i]) + PS[i]/SNY[i]);
-         }
-        logLy = logLx[q];
-        for (i=imin; i< imax; i++) logLy += (LarrayY[i]-LarrayX[i]);
-        
-    }
-
-
-    H = (logLy-logLx[q])/heat;
-    
-    alpha = log(gsl_rng_uniform(r));
-
-    if(H > alpha)
-    {
-        logLx[q] = logLy;
-        
-        if(typ == 0)
-        {
-            
-        acS[m]++;
-        Xsline[k] = Ysline[k];
-        ffitx[k] = ffity[k];
-            
-        for (i = imin; i < imax; ++i)
-           {
-               SM[i] = DS[i]; // replace
-               SN[i] = SNY[i];
-               LarrayX[i] = LarrayY[i];
-           }
-         
-            if(itype == 1)
-            {
-            for(i=0; i< Nknot; i++)
-             {
-               slopex[i] = slopey[i];
-               cx[i] = cy[i];
-               bx[i] = by[i];
-               delx[i] = dely[i];
-             }
-            }
-            
-    
-         free_double_vector(Ysline);
-         free_double_vector(ffity);
-         
-         if(itype == 1)
-         {
-             free_double_vector(slopey);
-             free_double_vector(by);
-             free_double_vector(cy);
-             free_double_vector(dely);
-         }
-         else
-         {
-           // free spline
-              gsl_spline_free (aspline);
-              gsl_interp_accel_free (acc);
-         }
-            
-        }
-        
-        if(typ == 1)
-        {
-        acL[m]++;
-          
-           linef[k] = ylinef;
-           lineh[k] = ylineh;
-           lineQ[k] = ylineQ;
-           linew[k] = ylinew;
-           deltafmax[k] = ydeltafmax;
-           
-          for (i = imin; i <= imax; ++i)
-           {
-               SL[i] += DS[i];   // delta this segment
-               SN[i] = SNY[i];
-               LarrayX[i] = LarrayY[i];
-           }
-            
-        }
-        
-    }
-    
-    free_double_vector(DS);
-    free_double_vector(SNY);
-    free_double_vector(LarrayY);
-    
-
-}
-
-int smoothset(int Ns, double *SM, double *freqs, double Tobs, double *fit, double *line, int *Nk)
-{
-    int i, sm;
-    int j, k, ii, kk, flag;
-    double x, max;
-    int Nknot;
-    double *S1, *S2;
-    
-    S1 = (double*)malloc(sizeof(double)*(Ns));
-    S2 = (double*)malloc(sizeof(double)*(Ns));
-    
-     // moving average
-     sm = (int)(smooth*Tobs);
-     x = 0.0;
-     for (i = 0; i < sm; ++i) x += SM[i];
-     for (i = sm; i < Ns; ++i)
-     {
-         S1[i-sm/2] = x/(double)(sm);
-         x += SM[i] - SM[i-sm];
-     }
-     
-     // moving average with wider window
-     sm *= 2;
-     x = 0.0;
-     for (i = 0; i < sm; ++i) x += SM[i];
-     for (i = sm; i < Ns; ++i)
-     {
-         S2[i-sm/2] = x/(double)(sm);
-         x += SM[i] - SM[i-sm];
-     }
-     
-     // fill initial bins
-     for (i = 0; i < sm/2; ++i)
-     {
-         S1[i] = SM[i];
-         S2[i] = 2.0*S1[i];
-     }
-     
-    // count the number of spline knots
-     Nknot = 1;
-     k = (int)(dfmin*Tobs);
-     kk = (int)(dfmax*Tobs);
-     j = 0;
-     flag = 0;
-     max = 0.0;
-     for (i = 1; i < Ns; ++i)
-     {
-         x = fabs(S2[i]/S1[i]-1.0);
-         if(x > max) max = x;
-         j++;
-          if(i%k == 0)
-           {
-               if(max > tol || j == kk)
-               {
-                  // printf("%f %f %f\n", (double)(i-j/2)/Tobs, (double)(j)/Tobs, max);
-                   max = 0.0;
-                   j = 0;
-                   Nknot++;
-               }
-           }
-         
-         
-     }
-     
-      Nknot++;
-     
-      printf("There are %d spline knots\n", Nknot);
-    
-      if(Nknot > maxmod)
-      {
-          printf("To many points in the smooth fit\n");
-          return 0;
-      }
-      
-      fit[0] = freqs[0];
-      line[0] = log(S1[0]);
-      
-      ii = 1;
-      j = 0;
-      flag = 0;
-      max = 0.0;
-      for (i = 1; i < Ns; ++i)
-      {
-          x = fabs(S2[i]/S1[i]-1.0);
-          if(x > max) max = x;
-          j++;
-           if(i%k == 0)
-            {
-                if(max > tol || j == kk)
-                {
-                    max = 0.0;
-                    fit[ii] = freqs[(i-j/2)];
-                    line[ii] = log(S1[i-j/2]);
-                    j = 0;
-                    ii++;
-                }
-            }
-          
-          
-      }
-      fit[Nknot-1] = freqs[Ns-1];
-      line[Nknot-1] = log(SM[Ns-1]);
-
-    *Nk = Nknot;
-    
-    free_double_vector(S1);
-    free_double_vector(S2);
-    
-    return 1;
-    
-}
-
-int lineset(int Ns, double *SM, double *PS, double *freqs, double Tobs, double *lf, double *lh, double *lQ, double *lw, double *dfmx, int *Nlns)
-{
-    int Nlines, flag, i, j, k, ii;
-    double x, max, xold, spread;
-    
-    // count the number of lines
-   j = 0;
-   flag = 0;
-   for (i = 0; i < Ns; ++i)
-   {
-       x = PS[i]/SM[i];
-       // start of a line
-       if(x > linemul && flag == 0)
-       {
-           k = 1;
-           flag = 1;
-           max = x;
-           ii = i;
-       }
-       // in a line
-       if(x > linemul  && flag ==1)
-       {
-           k++;
-           if(x > max)
-           {
-               max = x;
-               ii = i;
-           }
-       }
-       // have reached the end of a line
-       if(flag == 1)
-       {
-           if(x < linemul)
-           {
-               flag = 0;
-               j++;
-           }
-       }
-   }
-  
-   
-   Nlines = j;
-    
-    if(Nlines > maxmod)
-    {
-        printf("To many lines in the line model\n");
-        return 0;
-    }
-  
-  j = -1;
-  xold = 1.0;
-  flag = 0;
-  for (i = 0; i < Ns; ++i)
-  {
-      x = PS[i]/SM[i];
-      // start of a line
-      if(x > linemul && flag == 0)
-      {
-          k = 1;
-          flag = 1;
-          max = x;
-          ii = i;
-      }
-      // in a line
-      if((x > linemul) && flag ==1)
-      {
-          k++;
-          if(x > max)
-          {
-              max = x;
-              ii = i;
-          }
-      }
-      // have reached the end of a line
-      if(flag == 1)
-      {
-          if(x < linemul)
-          {
-              flag = 0;
-              j++;
-              lf[j] = freqs[ii];
-              lh[j] = (max-1.0)*SM[ii];
-              lQ[j] = sqrt(max)*lf[j]*Tobs/(double)(k);
-              
-                spread = (1.0e-2*lQ[j]);
-                if(spread < 50.0) spread = 50.0;  // maximum half-width is f_resonance/50
-                dfmx[j] = lf[j]/spread;
-                lw[j] = 8.0*dfmx[j];
-             
-          }
-      }
-
-  }
-  
-  printf("There are %d lines\n", Nlines);
-    
-    *Nlns = Nlines;
-    
-    return 1;
-
-}

@@ -33,16 +33,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define sthresh 10.0
 #define warm 6.0
 
-#define NCC  2  // number of cold chains
-#define NCH  2  // number of hot chains
+
+#define coremax  16  // maximum number of cores used
+#define addmul  1  // add or multiply the lines 0 for add, 1 for multiply
 #define maxmod 1000 // maximum number of parameters in each model
-#define verbose 1   // set to 0 for quiet run, 1 for verbose
+#define verbose 0   // set to 0 for quiet run, 1 for verbose
 #define printQscan 0  // set to 1 to print Qscan
 #define dfmin 4.0  // minimum spline spacing
 #define dfmax 32.0  // maximum spline spacing
 #define smooth 8.0   // moving average
 #define tol 0.2     // tolerance for difference in averages
-#define linemul 8.0 // how much above the Gaussian floor a line needs to be
+#define linemul 9.0 // how much above the Gaussian floor a line needs to be
 #define itype 1   // 0 for amkima splines, 1 for smoothed linear
 #define ompflag 0 // 1 to use open mp for the likelihood, 0 to not use it
 #define Qprint 8.0    // Q used to make output scans
@@ -75,6 +76,9 @@ void delta_setupsline(struct Smooth *smoothline, int iu, int Nknot, double *slin
 void sline(struct Smooth *smoothline, int istart, int iend, int Nknot, double *farray,  double *SM, double *ffit, double *slinep, double *bb, double *cc, double *dd);
 double ltc(struct Smooth *smoothline, double x);
 double line(double f, double linef, double lineh, double linew, double deltafmax, double lineQ);
+void update(int m, int q, double *logLx, struct Smooth *smoothline, double heat, double smsc, double lnsc, double Tobs, int Ns, int Nknot, int Nlines, double *freqs, double *PS, double *LarrayX, double *SM, double *SL, double *SN, double *ffitx, double *Xsline,  double *bx, double *cx, double *slopex, double *delx,  double  *linef, double *lineh, double *lineQ, double *linew, double *deltafmax, int *cS, int *cL, int *acS, int *acL, gsl_rng *r);
+int smoothset(int Ns, double *SM, double *freqs, double Tobs, double *fit, double *smline, int *Nk);
+int lineset(int Ns, double *SM, double *PS, double *freqs, double Tobs, double *lf, double *lh, double *lQ, double *lw, double *dfmx, int *Nlns);
 
 void Inverse(double **M, double **IM, int d);
 void whiten(double *data, double *Sn, int N);
